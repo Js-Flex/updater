@@ -2,7 +2,6 @@ import tls_client
 import random
 import string
 import time
-import re
 import threading
 import json
 import colorama
@@ -19,7 +18,7 @@ class Discord:
     global unlocked
     global locked
     global st
-    
+
     def __init__(self) -> None:
         self.data = configuration
         self.proxy = random.choice(loaded_proxies)
@@ -94,7 +93,6 @@ class Discord:
         }
 
         try:
-            # Attempt to fetch the registration page, retry if there are issues.
             retries = 3
             for _ in range(retries):
                 try:
@@ -119,8 +117,8 @@ class Discord:
         url = "https://discord.com/api/v9/users/@me/affinities/users"
         try:
             response = self.session.get(url)
-        except:
-            Log.bad("Error Sending Requests to check token")
+        except Exception as e:
+            Log.bad(f"Error Sending Requests to check token: {str(e)}")
             return Discord().begin()
         if int(response.status_code) in (400, 401, 403):
             Log.bad(f"Locked Token ({colorama.Fore.RED}{self.token[:25]}..{colorama.Fore.RESET})")
@@ -132,9 +130,9 @@ class Discord:
             return True
 
     def ConnectWS(self):
-            try:
-               self.ws.connect('wss://gateway.discord.gg/?encoding=json&v=9&compress=zlib-stream')
-               self.ws.send(json.dumps({
+        try:
+            self.ws.connect('wss://gateway.discord.gg/?encoding=json&v=9&compress=zlib-stream')
+            self.ws.send(json.dumps({
                 "op": 2,
                 "d": {
                     "token": self.token,
@@ -152,7 +150,7 @@ class Discord:
                         "referrer_current": "",
                         "referring_domain_current": "",
                         "release_channel": "stable",
-                        "client_build_number": build_num,
+                        "client_build_number": self.build_num,
                         "client_event_source": None
                     },
                         "presence": {
@@ -172,12 +170,12 @@ class Discord:
                         "api_code_version": 0
                     }
                 }
-                }))
-            except:
-                Log.bad("Error Onlining Token")
-                return
-            Log.good(f"Onlined Token --> ({colorama.Fore.LIGHTBLACK_EX}{self.token[:20]}..{colorama.Fore.RESET})", symbol="O")
+            }))
+        except Exception as e:
+            Log.bad(f"Error Onlining Token: {str(e)}")
             return
+        Log.good(f"Onlined Token --> ({colorama.Fore.LIGHTBLACK_EX}{self.token[:20]}..{colorama.Fore.RESET})", symbol="O")
+        return
 
     def get_fingerprint(self):
         url = 'https://discord.com/api/v9/experiments?with_guild_experiments=true'
@@ -204,8 +202,8 @@ class Discord:
         try:
             r = self.session.get(url)
             return r.json()['fingerprint']
-        except:
-            Log.bad("Error Fetching Fingerprint")
+        except Exception as e:
+            Log.bad(f"Error Fetching Fingerprint: {str(e)}")
             return Discord().begin()
 
     def create_acct(self):
@@ -250,9 +248,8 @@ class Discord:
         try:
             r = self.session.post(url, json=payload)
             self.token = r.json()['token']
-        except Exception:
-            print(r.json())
-            Log.bad("Error Creating Account!")
+        except Exception as e:
+            Log.bad(f"Error Creating Account: {str(e)}")
             return Discord().begin()
 
         self.session.headers = {
@@ -285,3 +282,7 @@ class Discord:
         self.fp = self.get_fingerprint()
         self.get_cookies()
         self.create_acct()
+
+if __name__ == "__main__":
+    discord = Discord()
+    discord.begin()
