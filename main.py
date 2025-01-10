@@ -6,74 +6,72 @@ import threading
 import json
 import colorama
 import ctypes
-from websocket import WebSocket
-from modules.utils import Utils
-from modules.logging import Log
-from modules.captcha import Captcha
-from modules.extra import UI
 import requests
+
+# Load configuration, proxies, and usernames from files
+def load_configuration():
+    try:
+        with open('config.json', 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print("config.json not found!")
+        exit()
+
+def load_proxies():
+    try:
+        with open('input/proxies.txt', 'r') as f:
+            return [line.strip() for line in f.readlines()]
+    except FileNotFoundError:
+        print("proxies.txt not found!")
+        exit()
+
+def load_usernames():
+    try:
+        with open('input/usernames.txt', 'r') as f:
+            return [line.strip() for line in f.readlines()]
+    except FileNotFoundError:
+        print("usernames.txt not found!")
+        exit()
 
 
 class Discord:
-    global unlocked
-    global locked
-    global st
+    def __init__(self, config, proxies, usernames) -> None:
+        self.data = config
+        self.proxy = random.choice(proxies)
 
-    def __init__(self) -> None:
-        self.data = configuration
-        self.proxy = random.choice(loaded_proxies)
-
-        self.ua_version = ua_version
-        self.ua = ua
-        self.sec_ch_ua = sec_ch_ua
+        self.ua_version = config['ua_version']
+        self.ua = config['ua']
+        self.sec_ch_ua = config['sec_ch_ua']
 
         self.session = tls_client.Session(client_identifier=f"chrome_{self.ua_version}", random_tls_extension_order=True)
         self.session.proxies = {
             'https': f"http://{self.proxy}",
             'http': f"http://{self.proxy}"
         }
-        self.ws = WebSocket()
 
-        self.bios = loaded_bios if self.data['bio'] else []
-        self.cap_key = self.data['captcha_api_key']
-        self.toggle_errors = self.data['show_errors']
+        self.bios = config['bios'] if config['bio'] else []
+        self.cap_key = config['captcha_api_key']
+        self.toggle_errors = config['show_errors']
 
-        self.lock = threading_lock
-        self.capabilities = 16381
-        self.build_num = build_num
-        self.x_sup = x_sup
+        self.lock = threading.Lock()
 
         self.rl = "The resource is being rate limited."
         self.locked = "You need to verify your account in order to perform this action"
         self.captcha_detected = "captcha-required"
 
-        if self.data['random_username']:
+        if config['random_username']:
             self.username = "".join(random.choice(string.ascii_letters) for x in range(random.randint(6, 8)))
         else:
-            self.username = random.choice(loaded_usernames)
+            self.username = random.choice(usernames)
 
         self.email = "".join(random.choice(string.ascii_letters) for x in range(random.randint(6, 8)))
         self.email += str("".join(str(random.randint(1, 9) if random.randint(1, 2) == 1 else random.choice(string.ascii_letters)) for x in range(int(random.randint(6, 8)))) )
         self.email += random.choice(["@gmail.com", "@outlook.com"])
 
-        if self.data['password'] == "":
+        if config['password'] == "":
             self.password = "".join(random.choice(string.digits) if random.randint(1, 2) == 1 else random.choice(string.ascii_letters) for x in range(random.randint(8, 24))) + "".join("" if random.randint(1, 2) == 1 else random.choice(["@", "$", "%", "*", "&", "^"]) for x in range(1, 6))
         else:
-            self.password = self.data['password']
-
-    @staticmethod
-    def display_stats():
-        while True:
-            if locked == 0 and unlocked == 0:
-                ur = "0.00%"
-            elif unlocked > 0 and locked == 0:
-                ur = "100.0%"
-            elif locked > 0 and unlocked == 0:
-                ur = "0.00%"
-            else:
-                ur = f"{round(100 - round(locked/unlocked * 100, 2), 2)}%"
-            ctypes.windll.kernel32.SetConsoleTitleW(f"[GITHUB] Pr0t0n's Generator | Unlocked: {unlocked} | Locked: {locked} | Unlock Rate: {ur} | Threads: {threading.active_count() - 2} | Time: {round(time.time() - st, 2)}s | github.com/pr0t0ns")
-            time.sleep(0.5)
+            self.password = config['password']
 
     def get_cookies(self):
         url = "https://discord.com/register"
@@ -99,83 +97,18 @@ class Discord:
                     response = self.session.get(url)  # Removed timeout parameter here
                     if response.status_code == 200:
                         self.session.cookies = response.cookies
-                        Log.good("Cookies fetched successfully.")
+                        print("Cookies fetched successfully.")
                         return
                     else:
-                        Log.bad(f"Error Fetching Cookies: Received Status Code {response.status_code}")
+                        print(f"Error Fetching Cookies: Received Status Code {response.status_code}")
                         time.sleep(2)  # Retry after a brief pause
                 except Exception as e:
-                    Log.bad(f"Error during cookie fetch attempt: {str(e)}")
+                    print(f"Error during cookie fetch attempt: {str(e)}")
                     time.sleep(2)  # Retry after a brief pause
-            Log.bad("Failed to fetch cookies after 3 retries.")
+            print("Failed to fetch cookies after 3 retries.")
         except Exception as e:
-            Log.bad(f"Error Fetching Cookies: {str(e)}")
+            print(f"Error Fetching Cookies: {str(e)}")
         return None
-
-    def check_token(self):
-        global unlocked, locked
-        url = "https://discord.com/api/v9/users/@me/affinities/users"
-        try:
-            response = self.session.get(url)
-        except Exception as e:
-            Log.bad(f"Error Sending Requests to check token: {str(e)}")
-            return Discord().begin()
-        if int(response.status_code) in (400, 401, 403):
-            Log.bad(f"Locked Token ({colorama.Fore.RED}{self.token[:25]}..{colorama.Fore.RESET})")
-            locked += 1
-            return
-        else:
-            Log.amazing(f"Unlocked Token ({colorama.Fore.LIGHTBLACK_EX}{self.token[:25]}..{colorama.Fore.RESET})")    
-            unlocked += 1
-            return True
-
-    def ConnectWS(self):
-        try:
-            self.ws.connect('wss://gateway.discord.gg/?encoding=json&v=9&compress=zlib-stream')
-            self.ws.send(json.dumps({
-                "op": 2,
-                "d": {
-                    "token": self.token,
-                    "capabilities": self.capabilities,
-                    "properties": {
-                        "os": "Windows",
-                        "browser": "Chrome",
-                        "device": "",
-                        "system_locale": "en-US",
-                        "browser_user_agent": self.ua,
-                        "browser_version": f"{self.ua_version}.0.0.0",
-                        "os_version": "10",
-                        "referrer": "",
-                        "referring_domain": "",
-                        "referrer_current": "",
-                        "referring_domain_current": "",
-                        "release_channel": "stable",
-                        "client_build_number": self.build_num,
-                        "client_event_source": None
-                    },
-                        "presence": {
-                        "status": random.choice(['online', 'idle', 'dnd']),
-                        "since": 0,
-                        "activities": [],
-                        "afk": False
-                    },
-                    "compress": False,
-                    "client_state": {
-                        "guild_versions": {},
-                        "highest_last_message_id": "0",
-                        "read_state_version": 0,
-                        "user_guild_settings_version": -1,
-                        "user_settings_version": -1,
-                        "private_channels_version": "0",
-                        "api_code_version": 0
-                    }
-                }
-            }))
-        except Exception as e:
-            Log.bad(f"Error Onlining Token: {str(e)}")
-            return
-        Log.good(f"Onlined Token --> ({colorama.Fore.LIGHTBLACK_EX}{self.token[:20]}..{colorama.Fore.RESET})", symbol="O")
-        return
 
     def get_fingerprint(self):
         url = 'https://discord.com/api/v9/experiments?with_guild_experiments=true'
@@ -193,7 +126,7 @@ class Discord:
             'sec-fetch-mode': 'cors',
             'sec-fetch-site': 'same-origin',
             'user-agent': self.ua,
-            'x-context-properties': Utils.build_x_context_properties("Register"),
+            'x-context-properties': "Register",
             'x-debug-options': 'bugReporterEnabled',
             'x-discord-locale': 'en-US',
             'x-discord-timezone': 'America/New_York',
@@ -203,8 +136,8 @@ class Discord:
             r = self.session.get(url)
             return r.json()['fingerprint']
         except Exception as e:
-            Log.bad(f"Error Fetching Fingerprint: {str(e)}")
-            return Discord().begin()
+            print(f"Error Fetching Fingerprint: {str(e)}")
+            return None
 
     def create_acct(self):
         url = 'https://discord.com/api/v9/auth/register'
@@ -227,7 +160,7 @@ class Discord:
                 'sec-fetch-mode': 'cors',
                 'sec-fetch-site': 'same-origin',
                 'user-agent': self.ua,
-                'x-captcha-key': str(Captcha.solve(user_agent=self.ua, api_key=self.data['captcha_api_key'], proxy=self.session.proxies['http'], service=self.data['captcha_service'])),
+                'x-captcha-key': str(self.cap_key),
                 'x-debug-options': 'bugReporterEnabled',
                 'x-discord-locale': 'en-US',
                 'x-discord-timezone': 'America/New_York',
@@ -248,41 +181,25 @@ class Discord:
         try:
             r = self.session.post(url, json=payload)
             self.token = r.json()['token']
+            print(f"Account Created! Token: {self.token}")
         except Exception as e:
-            Log.bad(f"Error Creating Account: {str(e)}")
-            return Discord().begin()
-
-        self.session.headers = {
-            'authority': 'discord.com',
-            'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.9',
-            'authorization': self.token,
-            'content-type': 'application/json',
-            'origin': 'https://discord.com',
-            'referer': 'https://discord.com/channels/@me',
-            'sec-ch-ua': self.sec_ch_ua,
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-origin',
-            'user-agent': self.ua,
-            'x-captcha-key': str(Captcha.solve(user_agent=self.ua, api_key=self.data['captcha_api_key'], proxy=self.session.proxies['http'], service=self.data['captcha_service'])),
-            'x-debug-options': 'bugReporterEnabled',
-            'x-discord-locale': 'en-US',
-            'x-discord-timezone': 'America/New_York',
-            'x-super-properties': self.x_sup,
-        }
-        Log.good(f"Account Created: ({self.email})")
-        self.get_cookies()
-        self.check_token()
-        self.ConnectWS()
+            print(f"Error Creating Account: {str(e)}")
 
     def begin(self):
         self.fp = self.get_fingerprint()
+        if self.fp is None:
+            print("Failed to retrieve fingerprint, stopping.")
+            return
+
         self.get_cookies()
         self.create_acct()
 
+
 if __name__ == "__main__":
-    discord = Discord()
+    # Load configuration, proxies, and usernames
+    configuration = load_configuration()
+    proxies = load_proxies()
+    usernames = load_usernames()
+
+    discord = Discord(configuration, proxies, usernames)
     discord.begin()
