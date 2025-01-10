@@ -1,205 +1,131 @@
 import tls_client
 import random
 import string
-import time
-import threading
 import json
-import colorama
-import ctypes
-import requests
-
-# Load configuration, proxies, and usernames from files
-def load_configuration():
-    try:
-        with open('config.json', 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        print("config.json not found!")
-        exit()
-
-def load_proxies():
-    try:
-        with open('input/proxies.txt', 'r') as f:
-            return [line.strip() for line in f.readlines()]
-    except FileNotFoundError:
-        print("proxies.txt not found!")
-        exit()
-
-def load_usernames():
-    try:
-        with open('input/usernames.txt', 'r') as f:
-            return [line.strip() for line in f.readlines()]
-    except FileNotFoundError:
-        print("usernames.txt not found!")
-        exit()
-
+import base64
+from modules.utils import Utils
+from modules.logging import Log
 
 class Discord:
-    def __init__(self, config, proxies, usernames) -> None:
-        self.data = config
-        self.proxy = random.choice(proxies)
+    def __init__(self) -> None:
+        self.session = tls_client.Session(client_identifier="chrome_124", random_tls_extension_order=True)
+        self.proxy = random.choice(loaded_proxies)  # Assuming `loaded_proxies` is a list of proxies
+        self.session.proxies = {'https': f"http://{self.proxy}", 'http': f"http://{self.proxy}"}
+        
+        # Dynamic headers
+        self.ua_version = "124"
+        self.ua = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{self.ua_version}.0.0.0 Safari/537.36"
+        self.sec_ch_ua = f'"Chromium";v="{self.ua_version}", "Google Chrome";v="{self.ua_version}", "Not-A.Brand";v="99"'
 
-        self.ua_version = config['ua_version']
-        self.ua = config['ua']
-        self.sec_ch_ua = config['sec_ch_ua']
+        # Initial placeholders
+        self.x_sup = None
+        self.fingerprint = None
+        self.token = None
 
-        self.session = tls_client.Session(client_identifier=f"chrome_{self.ua_version}", random_tls_extension_order=True)
-        self.session.proxies = {
-            'https': f"http://{self.proxy}",
-            'http': f"http://{self.proxy}"
-        }
-
-        self.bios = config['bios'] if config['bio'] else []
-        self.cap_key = config['captcha_api_key']
-        self.toggle_errors = config['show_errors']
-
-        self.lock = threading.Lock()
-
-        self.rl = "The resource is being rate limited."
-        self.locked = "You need to verify your account in order to perform this action"
-        self.captcha_detected = "captcha-required"
-
-        if config['random_username']:
-            self.username = "".join(random.choice(string.ascii_letters) for x in range(random.randint(6, 8)))
-        else:
-            self.username = random.choice(usernames)
-
-        self.email = "".join(random.choice(string.ascii_letters) for x in range(random.randint(6, 8)))
-        self.email += str("".join(str(random.randint(1, 9) if random.randint(1, 2) == 1 else random.choice(string.ascii_letters)) for x in range(int(random.randint(6, 8)))) )
-        self.email += random.choice(["@gmail.com", "@outlook.com"])
-
-        if config['password'] == "":
-            self.password = "".join(random.choice(string.digits) if random.randint(1, 2) == 1 else random.choice(string.ascii_letters) for x in range(random.randint(8, 24))) + "".join("" if random.randint(1, 2) == 1 else random.choice(["@", "$", "%", "*", "&", "^"]) for x in range(1, 6))
-        else:
-            self.password = config['password']
-
-    def get_cookies(self):
-        url = "https://discord.com/register"
-        self.session.headers = {
-            'authority': 'discord.com',
-            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'accept-language': 'en-US,en;q=0.9',
-            'sec-ch-ua': self.sec_ch_ua,
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'sec-fetch-dest': 'document',
-            'sec-fetch-mode': 'navigate',
-            'sec-fetch-site': 'none',
-            'sec-fetch-user': '?1',
-            'upgrade-insecure-requests': '1',
-            'user-agent': self.ua,
-        }
-
+    def fetch_headers(self):
+        """Automatically fetch necessary headers like x-super-properties, fingerprint, etc."""
         try:
-            retries = 3
-            for _ in range(retries):
-                try:
-                    response = self.session.get(url)  # Removed timeout parameter here
-                    if response.status_code == 200:
-                        self.session.cookies = response.cookies
-                        print("Cookies fetched successfully.")
-                        return
-                    else:
-                        print(f"Error Fetching Cookies: Received Status Code {response.status_code}")
-                        time.sleep(2)  # Retry after a brief pause
-                except Exception as e:
-                    print(f"Error during cookie fetch attempt: {str(e)}")
-                    time.sleep(2)  # Retry after a brief pause
-            print("Failed to fetch cookies after 3 retries.")
+            url = "https://discord.com/register"
+            response = self.session.get(url)
+            if response.status_code != 200:
+                Log.bad("Failed to fetch registration page.")
+                return
+
+            # Fetch x-super-properties (Base64-encoded)
+            self.x_sup = response.headers.get("x-super-properties")
+            if not self.x_sup:
+                Log.bad("x-super-properties not found in headers.")
+                return
+
+            # Fetch fingerprint
+            self.fingerprint = self.get_fingerprint()
+            if not self.fingerprint:
+                Log.bad("Failed to fetch fingerprint.")
+                return
+
+            Log.good(f"Successfully fetched x-super-properties and fingerprint.")
         except Exception as e:
-            print(f"Error Fetching Cookies: {str(e)}")
-        return None
+            Log.bad(f"Error fetching headers: {str(e)}")
 
     def get_fingerprint(self):
-        url = 'https://discord.com/api/v9/experiments?with_guild_experiments=true'
+        """Get the fingerprint from Discord's API."""
+        url = "https://discord.com/api/v9/experiments?with_guild_experiments=true"
         self.session.headers = {
             'accept': '*/*',
             'accept-language': 'en-US,en;q=0.9',
             'cache-control': 'no-cache',
             'pragma': 'no-cache',
-            'priority': 'u=1, i',
             'referer': 'https://discord.com/register',
             'sec-ch-ua': self.sec_ch_ua,
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
             'sec-fetch-dest': 'empty',
             'sec-fetch-mode': 'cors',
             'sec-fetch-site': 'same-origin',
             'user-agent': self.ua,
-            'x-context-properties': "Register",
-            'x-debug-options': 'bugReporterEnabled',
-            'x-discord-locale': 'en-US',
-            'x-discord-timezone': 'America/New_York',
-            'x-super-properties': self.x_sup,
         }
         try:
-            r = self.session.get(url)
-            return r.json()['fingerprint']
+            response = self.session.get(url)
+            if response.status_code == 200:
+                return response.json()['fingerprint']
+            else:
+                Log.bad("Failed to fetch fingerprint.")
+                return None
         except Exception as e:
-            print(f"Error Fetching Fingerprint: {str(e)}")
+            Log.bad(f"Error fetching fingerprint: {str(e)}")
             return None
 
     def create_acct(self):
-        url = 'https://discord.com/api/v9/auth/register'
-        self.display_name = self.username
-        self.session.headers = {
-                'authority': 'discord.com',
-                'accept': '*/*',
-                "accept-encoding": "gzip, deflate, br",
-                'accept-language': 'en-US,en;q=0.9',
-                'cache-control': 'no-cache',
-                'content-type': 'application/json',
-                'origin': 'https://discord.com',
-                'pragma': 'no-cache',
-                'priority': 'u=1, i',
-                'referer': 'https://discord.com/register',
-                'sec-ch-ua': self.sec_ch_ua,
-                'sec-ch-ua-mobile': '?0',
-                'sec-ch-ua-platform': '"Windows"',
-                'sec-fetch-dest': 'empty',
-                'sec-fetch-mode': 'cors',
-                'sec-fetch-site': 'same-origin',
-                'user-agent': self.ua,
-                'x-captcha-key': str(self.cap_key),
-                'x-debug-options': 'bugReporterEnabled',
-                'x-discord-locale': 'en-US',
-                'x-discord-timezone': 'America/New_York',
-                'x-fingerprint': self.fp,
-                'x-super-properties': self.x_sup,
-        }
-        payload = {
-                'fingerprint': self.fp,
-                'email': self.email,
-                'username': self.username + "".join(random.choice(string.ascii_letters) for x in range(random.randint(1, 3))),
-                'global_name': self.display_name,
-                'password': self.password,
-                'invite': self.data["invite"] if self.data["invite"] != None else None,
-                'consent': True,
-                'date_of_birth': f'{random.randint(1980, 2001)}-{random.randint(1, 10)}-{random.randint(1, 10)}',
-                'gift_code_sku_id': None
-        }
-        try:
-            r = self.session.post(url, json=payload)
-            self.token = r.json()['token']
-            print(f"Account Created! Token: {self.token}")
-        except Exception as e:
-            print(f"Error Creating Account: {str(e)}")
-
-    def begin(self):
-        self.fp = self.get_fingerprint()
-        if self.fp is None:
-            print("Failed to retrieve fingerprint, stopping.")
+        """Create a new account."""
+        if not self.x_sup or not self.fingerprint:
+            Log.bad("Missing required headers. Cannot create account.")
             return
 
-        self.get_cookies()
+        url = 'https://discord.com/api/v9/auth/register'
+        display_name = "".join(random.choice(string.ascii_letters) for _ in range(random.randint(6, 8)))
+        email = "".join(random.choice(string.ascii_letters) for _ in range(random.randint(6, 8)))
+        email += str(random.randint(1000, 9999)) + "@gmail.com"
+        password = "".join(random.choice(string.ascii_letters + string.digits + "@$%*&^") for _ in range(random.randint(8, 24)))
+
+        payload = {
+            'fingerprint': self.fingerprint,
+            'email': email,
+            'username': display_name,
+            'password': password,
+            'consent': True,
+            'date_of_birth': f'{random.randint(1980, 2001)}-{random.randint(1, 10)}-{random.randint(1, 10)}',
+        }
+        
+        self.session.headers = {
+            'authority': 'discord.com',
+            'accept': '*/*',
+            'accept-language': 'en-US,en;q=0.9',
+            'content-type': 'application/json',
+            'origin': 'https://discord.com',
+            'referer': 'https://discord.com/register',
+            'sec-ch-ua': self.sec_ch_ua,
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+            'user-agent': self.ua,
+            'x-super-properties': self.x_sup,
+            'x-fingerprint': self.fingerprint,
+        }
+
+        try:
+            response = self.session.post(url, json=payload)
+            if response.status_code == 200:
+                self.token = response.json()['token']
+                Log.good(f"Account created successfully! Token: {self.token}")
+            else:
+                Log.bad(f"Error creating account: {response.json()}")
+        except Exception as e:
+            Log.bad(f"Error creating account: {str(e)}")
+
+    def begin(self):
+        """Begin the process of fetching headers and creating accounts."""
+        self.fetch_headers()
         self.create_acct()
 
-
+# Run the script
 if __name__ == "__main__":
-    # Load configuration, proxies, and usernames
-    configuration = load_configuration()
-    proxies = load_proxies()
-    usernames = load_usernames()
-
-    discord = Discord(configuration, proxies, usernames)
+    discord = Discord()
     discord.begin()
