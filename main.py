@@ -2,17 +2,18 @@ import tls_client
 import random
 import string
 import time
-import re
 import threading
 import json
 import colorama
 import ctypes
+import requests
+import shutil
 from websocket import WebSocket
 from modules.utils import Utils
 from modules.logging import Log
 from modules.captcha import Captcha
 from modules.extra import UI
-
+import requests
 
 class Discord:
     global unlocked
@@ -91,16 +92,25 @@ class Discord:
             'upgrade-insecure-requests': '1',
             'user-agent': self.ua,
         }
+
         try:
-            response = self.session.get(url)
-            response.raise_for_status()  # Ensure we raise an error on a bad response (e.g., 400 or 500 series)
-            self.session.cookies = response.cookies
-            Log.good("Cookies fetched successfully.")
-        except Exception as e:
-            Log.bad(f"Error Fetching Cookies: {str(e)}")
-            # Optionally, add a retry mechanism or terminate gracefully
-            return None
-        return
+            # Attempt to fetch the registration page, retry if there are issues.
+            retries = 3
+            for _ in range(retries):
+                response = self.session.get(url, timeout=10)
+                if response.status_code == 200:
+                    self.session.cookies = response.cookies
+                    Log.good("Cookies fetched successfully.")
+                    return
+                else:
+                    Log.bad(f"Error Fetching Cookies: Received Status Code {response.status_code}")
+                    time.sleep(2)  # Retry after a brief pause
+            Log.bad("Failed to fetch cookies after 3 retries.")
+        except requests.exceptions.Timeout:
+            Log.bad("Timeout error while fetching cookies.")
+        except requests.exceptions.RequestException as e:
+            Log.bad(f"Request Exception while fetching cookies: {e}")
+        return None
 
     def check_token(self):
         global unlocked, locked
