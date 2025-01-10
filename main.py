@@ -29,8 +29,8 @@ class Discord:
 
         self.session = tls_client.Session(client_identifier=f"chrome_{self.ua_version}", random_tls_extension_order=True)
         self.session.proxies = {
-            'https': "http://{}".format(self.proxy),
-            'http': "http://{}".format(self.proxy)
+            'https': f"http://{self.proxy}",
+            'http': f"http://{self.proxy}"
         }
         self.ws = WebSocket()
 
@@ -53,10 +53,11 @@ class Discord:
             self.username = random.choice(loaded_usernames)
 
         self.email = "".join(random.choice(string.ascii_letters) for x in range(random.randint(6, 8)))
-        self.email += str("".join(str(random.randint(1, 9) if random.randint(1, 2) == 1 else random.choice(string.ascii_letters)) for x in range(int(random.randint(6, 8)))) )
+        self.email += str("".join(str(random.randint(1, 9) if random.randint(1, 2) == 1 else random.choice(string.ascii_letters)) for x in range(int(random.randint(6, 8)))))
         self.email += random.choice(["@gmail.com", "@outlook.com"])
         if self.data['password'] == "":
-            self.password = "".join(random.choice(string.digits) if random.randint(1, 2) == 1 else random.choice(string.ascii_letters) for x in range(random.randint(8, 24))) + "".join("" if random.randint(1, 2) == 1 else random.choice(["@", "$", "%", "*", "&", "^"]) for x in range(1, 6))
+            self.password = "".join(random.choice(string.digits) if random.randint(1, 2) == 1 else random.choice(string.ascii_letters) for x in range(random.randint(8, 24))) + "".join(
+                "" if random.randint(1, 2) == 1 else random.choice(["@", "$", "%", "*", "&", "^"]) for x in range(1, 6))
         else:
             self.password = self.data['password']
 
@@ -90,47 +91,32 @@ class Discord:
             'upgrade-insecure-requests': '1',
             'user-agent': self.ua,
         }
-
-        retry_count = 0
-        while retry_count < 5:
-            try:
-                response = self.session.get(url)
-                
-                if response.status_code != 200:
-                    Log.bad(f"Failed to Fetch Cookies. Status Code: {response.status_code}")
-                    Log.bad(f"Response Headers: {json.dumps(dict(response.headers), indent=4)}")
-                    Log.bad(f"Response Body: {response.text[:500]}")
-                    raise Exception(f"Unexpected response code: {response.status_code}")
-                
-                self.session.cookies = response.cookies
-                Log.good(f"Successfully Fetched Cookies: {len(response.cookies)} cookies")
-                return
-
-            except Exception as e:
-                retry_count += 1
-                Log.bad(f"Error Fetching Cookies: {str(e)}. Retrying {retry_count}/5...")
-                Log.bad(f"URL: {url}")
-                Log.bad(f"Headers: {json.dumps(self.session.headers, indent=4)}")
-                if retry_count >= 5:
-                    Log.bad("Max retries reached. Exiting.")
-                    return Discord().begin()
-                
-                time.sleep(3 * (2 ** (retry_count - 1)))  # Exponential backoff
+        try:
+            response = self.session.get(url)
+            response.raise_for_status()  # Ensure we raise an error on a bad response (e.g., 400 or 500 series)
+            self.session.cookies = response.cookies
+            Log.good("Cookies fetched successfully.")
+        except Exception as e:
+            Log.bad(f"Error Fetching Cookies: {str(e)}")
+            # Optionally, add a retry mechanism or terminate gracefully
+            return None
+        return
 
     def check_token(self):
         global unlocked, locked
         url = "https://discord.com/api/v9/users/@me/affinities/users"
         try:
             response = self.session.get(url)
-        except:
-            Log.bad("Error Sending Requests to check token")
+            response.raise_for_status()
+        except Exception as e:
+            Log.bad(f"Error Sending Requests to check token: {str(e)}")
             return Discord().begin()
-        if int(response.status_code) in (400, 401, 403):
+        if response.status_code in (400, 401, 403):
             Log.bad(f"Locked Token ({colorama.Fore.RED}{self.token[:25]}..{colorama.Fore.RESET})")
             locked += 1
             return
         else:
-            Log.amazing(f"Unlocked Token ({colorama.Fore.LIGHTBLACK_EX}{self.token[:25]}..{colorama.Fore.RESET})")
+            Log.amazing(f"Unlocked Token ({colorama.Fore.LIGHTBLACK_EX}{self.token[:25]}..{colorama.Fore.RESET})")    
             unlocked += 1
             return True
 
@@ -176,8 +162,8 @@ class Discord:
                     }
                 }
             }))
-        except:
-            Log.bad("Error Onlining Token")
+        except Exception as e:
+            Log.bad(f"Error Onlining Token: {str(e)}")
             return
         Log.good(f"Onlined Token --> ({colorama.Fore.LIGHTBLACK_EX}{self.token[:20]}..{colorama.Fore.RESET})", symbol="O")
         return
@@ -207,8 +193,8 @@ class Discord:
         try:
             r = self.session.get(url)
             return r.json()['fingerprint']
-        except:
-            Log.bad("Error Fetching Fingerprint")
+        except Exception as e:
+            Log.bad(f"Error Fetching Fingerprint: {str(e)}")
             return Discord().begin()
 
     def create_acct(self):
@@ -232,32 +218,111 @@ class Discord:
             'sec-fetch-mode': 'cors',
             'sec-fetch-site': 'same-origin',
             'user-agent': self.ua,
-            'x-context-properties': Utils.build_x_context_properties("Register"),
+            'x-captcha-key': str(Captcha.solve(user_agent=self.ua, api_key=self.data['captcha_api_key'], proxy=self.session.proxies['http'], service=self.data['captcha_service'])),
+            'x-debug-options': 'bugReporterEnabled',
+            'x-discord-locale': 'en-US',
+            'x-discord-timezone': 'America/New_York',
+            'x-fingerprint': self.fp,
+            'x-super-properties': self.x_sup,
+        }
+        payload = {
+            'fingerprint': self.fp,
+            'email': self.email,
+            'username': self.username + "".join(random.choice(string.ascii_letters) for x in range(random.randint(1, 3))),
+            'global_name': self.display_name,
+            'password': self.password,
+            'invite': self.data["invite"] if self.data["invite"] != None else None,
+            'consent': True,
+            'date_of_birth': f'{random.randint(1980, 2001)}-{random.randint(1, 10)}-{random.randint(1, 10)}',
+            'gift_code_sku_id': None
+        }
+        try:
+            r = self.session.post(url, json=payload)
+            self.token = r.json()['token']
+        except Exception as e:
+            Log.bad(f"Error Creating Account: {str(e)}")
+            return Discord().begin()
+
+        self.session.headers = {
+            'authority': 'discord.com',
+            'accept': '*/*',
+            'accept-language': 'en-US,en;q=0.9',
+            'authorization': self.token,
+            'content-type': 'application/json',
+            'origin': 'https://discord.com',
+            'referer': 'https://discord.com/channels/@me',
+            'sec-ch-ua': self.sec_ch_ua,
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+            'user-agent': self.ua,
             'x-debug-options': 'bugReporterEnabled',
             'x-discord-locale': 'en-US',
             'x-discord-timezone': 'America/New_York',
             'x-super-properties': self.x_sup,
         }
-        payload = {
-            "captcha_key": self.captcha_key,
-            "email": self.email,
-            "password": self.password,
-            "username": self.username,
-            "consent": True,
-            "date_of_birth": self.data['dob'],
-            "gift_code_sku_id": None,
-            "invite": None,
-            "promotional_email_opt_in": True
-        }
+        self.ConnectWS()
+        res = self.check_token()
+        if res:
+            if True:
+                with open("./output/tokens.txt", 'a+') as f:
+                    self.lock.acquire(blocking=True)
+                    f.write(f"{self.email}:{self.password}:{self.token}\n")
+                    self.lock.release()
+        return
 
-        try:
-            response = self.session.post(url, json=payload)
-            if response.status_code == 201:
-                Log.good(f"Created Account: {self.email}")
-                return self.check_token()
-            else:
-                Log.bad(f"Failed to Create Account: {response.text}")
-                return
-        except Exception as e:
-            Log.bad(f"Error Creating Account: {str(e)}")
-            return
+    def begin(self):
+        self.get_cookies()
+        self.fp = self.get_fingerprint()
+        self.create_acct()
+        return Discord().begin()
+
+class load_files:
+    @staticmethod
+    def load_txt() -> list:
+        formatted_usrs = []
+        loaded_proxies = [prox.strip() for prox in open('./input/proxies.txt', encoding="utf-8")]
+        loaded_bios = [bio.strip() for bio in open("./input/bios.txt", encoding="utf-8")]
+        loaded_usernames = [usr.strip() for usr in open('./input/usernames.txt', encoding="utf-8")]
+        for usr in loaded_usernames:
+            formatted_usrs.append(re.sub(r'[^a-zA-Z0-9 \n\.]', '', usr).replace(" ", ""))  # Clean malformatted usernames
+        return loaded_proxies, loaded_bios, formatted_usrs
+
+    @staticmethod
+    def load_config():
+        global license_key
+        with open("config.json") as f:
+            data = json.load(f)
+        return data
+
+
+if __name__ == "__main__":
+
+    unlocked = 0
+    locked = 0
+
+    # Initialize
+    colorama.init(autoreset=True)
+    threading_lock = threading.Lock()
+    configuration = load_files.load_config()
+    loaded_proxies, loaded_bios, loaded_usernames = load_files.load_txt()
+
+    # User Agent Information
+    ua_version = "124"
+    ua = f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{ua_version}.0.0.0 Safari/537.36'
+    sec_ch_ua = f'"Chromium";v="{ua_version}", "Google Chrome";v="{ua_version}", "Not-A.Brand";v="99"'
+
+    # XSUP, BUILDNUM, ETC..
+    build_num = Utils.fetch_buildnum()
+    x_sup = Utils.build_xsup(ua, ua_version, build_num)
+
+    UI.show()
+    thds = int(input("Threads: "))
+    UI.clear()
+    st = time.time()
+    for _ in range(thds):
+        threading.Thread(target=Discord().begin).start()
+
+    threading.Thread(target=Discord.display_stats).start()
