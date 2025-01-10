@@ -14,47 +14,56 @@ from modules.captcha import Captcha
 from modules.extra import UI
 import requests
 
+
 class Discord:
-    def __init__(self, configuration, loaded_proxies, ua_version, ua, sec_ch_ua, loaded_bios, threading_lock, build_num, x_sup, loaded_usernames):
+    global unlocked
+    global locked
+    global st
+    
+    def __init__(self) -> None:
         self.data = configuration
         self.proxy = random.choice(loaded_proxies)
+
         self.ua_version = ua_version
         self.ua = ua
         self.sec_ch_ua = sec_ch_ua
+
         self.session = tls_client.Session(client_identifier=f"chrome_{self.ua_version}", random_tls_extension_order=True)
         self.session.proxies = {
             'https': f"http://{self.proxy}",
             'http': f"http://{self.proxy}"
         }
         self.ws = WebSocket()
+
         self.bios = loaded_bios if self.data['bio'] else []
         self.cap_key = self.data['captcha_api_key']
         self.toggle_errors = self.data['show_errors']
+
         self.lock = threading_lock
         self.capabilities = 16381
         self.build_num = build_num
         self.x_sup = x_sup
+
         self.rl = "The resource is being rate limited."
         self.locked = "You need to verify your account in order to perform this action"
         self.captcha_detected = "captcha-required"
 
         if self.data['random_username']:
-            self.username = "".join(random.choice(string.ascii_letters) for _ in range(random.randint(6, 8)))
+            self.username = "".join(random.choice(string.ascii_letters) for x in range(random.randint(6, 8)))
         else:
             self.username = random.choice(loaded_usernames)
 
-        self.email = "".join(random.choice(string.ascii_letters) for _ in range(random.randint(6, 8)))
-        self.email += "".join(str(random.randint(1, 9) if random.randint(1, 2) == 1 else random.choice(string.ascii_letters)) for _ in range(random.randint(6, 8)))
+        self.email = "".join(random.choice(string.ascii_letters) for x in range(random.randint(6, 8)))
+        self.email += str("".join(str(random.randint(1, 9) if random.randint(1, 2) == 1 else random.choice(string.ascii_letters)) for x in range(int(random.randint(6, 8)))) )
         self.email += random.choice(["@gmail.com", "@outlook.com"])
 
         if self.data['password'] == "":
-            self.password = "".join(random.choice(string.digits) if random.randint(1, 2) == 1 else random.choice(string.ascii_letters) for _ in range(random.randint(8, 24))) + "".join("" if random.randint(1, 2) == 1 else random.choice(["@", "$", "%", "*", "&", "^"]) for _ in range(1, 6))
+            self.password = "".join(random.choice(string.digits) if random.randint(1, 2) == 1 else random.choice(string.ascii_letters) for x in range(random.randint(8, 24))) + "".join("" if random.randint(1, 2) == 1 else random.choice(["@", "$", "%", "*", "&", "^"]) for x in range(1, 6))
         else:
             self.password = self.data['password']
 
     @staticmethod
     def display_stats():
-        global unlocked, locked, st
         while True:
             if locked == 0 and unlocked == 0:
                 ur = "0.00%"
@@ -84,42 +93,48 @@ class Discord:
             'user-agent': self.ua,
         }
 
-        retries = 3
-        for _ in range(retries):
-            try:
-                response = self.session.get(url)
-                if response.status_code == 200:
-                    self.session.cookies = response.cookies
-                    Log.good("Cookies fetched successfully.")
-                    return
-                else:
-                    Log.bad(f"Error Fetching Cookies: Received Status Code {response.status_code}")
-                    time.sleep(2)
-            except Exception as e:
-                Log.bad(f"Error during cookie fetch attempt: {str(e)}")
-                time.sleep(2)
-        Log.bad("Failed to fetch cookies after 3 retries.")
+        try:
+            # Attempt to fetch the registration page, retry if there are issues.
+            retries = 3
+            for _ in range(retries):
+                try:
+                    response = self.session.get(url)  # Removed timeout parameter here
+                    if response.status_code == 200:
+                        self.session.cookies = response.cookies
+                        Log.good("Cookies fetched successfully.")
+                        return
+                    else:
+                        Log.bad(f"Error Fetching Cookies: Received Status Code {response.status_code}")
+                        time.sleep(2)  # Retry after a brief pause
+                except Exception as e:
+                    Log.bad(f"Error during cookie fetch attempt: {str(e)}")
+                    time.sleep(2)  # Retry after a brief pause
+            Log.bad("Failed to fetch cookies after 3 retries.")
+        except Exception as e:
+            Log.bad(f"Error Fetching Cookies: {str(e)}")
+        return None
 
     def check_token(self):
         global unlocked, locked
         url = "https://discord.com/api/v9/users/@me/affinities/users"
         try:
             response = self.session.get(url)
-        except Exception as e:
-            Log.bad(f"Error Sending Requests to check token: {str(e)}")
-            return self.begin()
-        if response.status_code in (400, 401, 403):
+        except:
+            Log.bad("Error Sending Requests to check token")
+            return Discord().begin()
+        if int(response.status_code) in (400, 401, 403):
             Log.bad(f"Locked Token ({colorama.Fore.RED}{self.token[:25]}..{colorama.Fore.RESET})")
             locked += 1
+            return
         else:
-            Log.amazing(f"Unlocked Token ({colorama.Fore.LIGHTBLACK_EX}{self.token[:25]}..{colorama.Fore.RESET})")
+            Log.amazing(f"Unlocked Token ({colorama.Fore.LIGHTBLACK_EX}{self.token[:25]}..{colorama.Fore.RESET})")    
             unlocked += 1
             return True
 
     def ConnectWS(self):
-        try:
-            self.ws.connect('wss://gateway.discord.gg/?encoding=json&v=9&compress=zlib-stream')
-            self.ws.send(json.dumps({
+            try:
+               self.ws.connect('wss://gateway.discord.gg/?encoding=json&v=9&compress=zlib-stream')
+               self.ws.send(json.dumps({
                 "op": 2,
                 "d": {
                     "token": self.token,
@@ -137,10 +152,10 @@ class Discord:
                         "referrer_current": "",
                         "referring_domain_current": "",
                         "release_channel": "stable",
-                        "client_build_number": self.build_num,
+                        "client_build_number": build_num,
                         "client_event_source": None
                     },
-                    "presence": {
+                        "presence": {
                         "status": random.choice(['online', 'idle', 'dnd']),
                         "since": 0,
                         "activities": [],
@@ -157,11 +172,12 @@ class Discord:
                         "api_code_version": 0
                     }
                 }
-            }))
-        except Exception as e:
-            Log.bad(f"Error Onlining Token: {str(e)}")
+                }))
+            except:
+                Log.bad("Error Onlining Token")
+                return
+            Log.good(f"Onlined Token --> ({colorama.Fore.LIGHTBLACK_EX}{self.token[:20]}..{colorama.Fore.RESET})", symbol="O")
             return
-        Log.good(f"Onlined Token --> ({colorama.Fore.LIGHTBLACK_EX}{self.token[:20]}..{colorama.Fore.RESET})", symbol="O")
 
     def get_fingerprint(self):
         url = 'https://discord.com/api/v9/experiments?with_guild_experiments=true'
@@ -187,25 +203,66 @@ class Discord:
         }
         try:
             r = self.session.get(url)
-            return r.json().get('fingerprint')
-        except Exception as e:
-            Log.bad(f"Error Fetching Fingerprint: {str(e)}")
-            return self.begin()
+            return r.json()['fingerprint']
+        except:
+            Log.bad("Error Fetching Fingerprint")
+            return Discord().begin()
 
     def create_acct(self):
         url = 'https://discord.com/api/v9/auth/register'
         self.display_name = self.username
         self.session.headers = {
+                'authority': 'discord.com',
+                'accept': '*/*',
+                "accept-encoding": "gzip, deflate, br",
+                'accept-language': 'en-US,en;q=0.9',
+                'cache-control': 'no-cache',
+                'content-type': 'application/json',
+                'origin': 'https://discord.com',
+                'pragma': 'no-cache',
+                'priority': 'u=1, i',
+                'referer': 'https://discord.com/register',
+                'sec-ch-ua': self.sec_ch_ua,
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"Windows"',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-origin',
+                'user-agent': self.ua,
+                'x-captcha-key': str(Captcha.solve(user_agent=self.ua, api_key=self.data['captcha_api_key'], proxy=self.session.proxies['http'], service=self.data['captcha_service'])),
+                'x-debug-options': 'bugReporterEnabled',
+                'x-discord-locale': 'en-US',
+                'x-discord-timezone': 'America/New_York',
+                'x-fingerprint': self.fp,
+                'x-super-properties': self.x_sup,
+        }
+        payload = {
+                'fingerprint': self.fp,
+                'email': self.email,
+                'username': self.username + "".join(random.choice(string.ascii_letters) for x in range(random.randint(1, 3))),
+                'global_name': self.display_name,
+                'password': self.password,
+                'invite': self.data["invite"] if self.data["invite"] != None else None,
+                'consent': True,
+                'date_of_birth': f'{random.randint(1980, 2001)}-{random.randint(1, 10)}-{random.randint(1, 10)}',
+                'gift_code_sku_id': None
+        }
+        try:
+            r = self.session.post(url, json=payload)
+            self.token = r.json()['token']
+        except Exception:
+            print(r.json())
+            Log.bad("Error Creating Account!")
+            return Discord().begin()
+
+        self.session.headers = {
             'authority': 'discord.com',
             'accept': '*/*',
-            'accept-encoding': 'gzip, deflate, br',
             'accept-language': 'en-US,en;q=0.9',
-            'cache-control': 'no-cache',
+            'authorization': self.token,
             'content-type': 'application/json',
             'origin': 'https://discord.com',
-            'pragma': 'no-cache',
-            'priority': 'u=1, i',
-            'referer': 'https://discord.com/register',
+            'referer': 'https://discord.com/channels/@me',
             'sec-ch-ua': self.sec_ch_ua,
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"Windows"',
@@ -217,28 +274,8 @@ class Discord:
             'x-debug-options': 'bugReporterEnabled',
             'x-discord-locale': 'en-US',
             'x-discord-timezone': 'America/New_York',
-            'x-fingerprint': self.fp,
             'x-super-properties': self.x_sup,
         }
-        payload = {
-            'fingerprint': self.fp,
-            'email': self.email,
-            'username': self.username + "".join(random.choice(string.ascii_letters) for _ in range(random.randint(1, 3))),
-            'global_name': self.display_name,
-            'password': self.password,
-            'invite': self.data["invite"] if self.data["invite"] else None,
-            'consent': True,
-            'date_of_birth': f'{random.randint(1980, 2001)}-{random.randint(1, 10)}-{random.randint(1, 10)}',
-            'gift_code_sku_id': None
-        }
-        try:
-            r = self.session.post(url, json=payload)
-            self.token = r.json().get('token')
-        except Exception as e:
-            Log.bad(f"Error Creating Account: {str(e)}")
-            return self.begin()
-
-        self.session.headers['authorization'] = self.token
         Log.good(f"Account Created: ({self.email})")
         self.get_cookies()
         self.check_token()
